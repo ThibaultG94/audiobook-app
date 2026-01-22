@@ -66,20 +66,28 @@ async def convert_file_with_chapters(
 
 async def _convert_file(file: UploadFile, background_tasks: BackgroundTasks, voice: str = None, split_chapters: bool = False):
     """Internal conversion function."""
+    print(f"[DEBUG] Converting file: {file.filename}")
+    print(f"[DEBUG] Content type: {file.content_type}")
+    print(f"[DEBUG] Voice: {voice}, split_chapters: {split_chapters}")
+
     # Validate file type
     allowed_extensions = ['.pdf', '.epub', '.txt']
     file_extension = Path(file.filename).suffix.lower()
-    
+    print(f"[DEBUG] File extension: {file_extension}")
+
     if file_extension not in allowed_extensions:
+        print(f"[DEBUG] Invalid file extension")
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported file type. Allowed: {', '.join(allowed_extensions)}"
         )
-    
+
     # Validate file size (max 50MB)
     max_size = 50 * 1024 * 1024  # 50MB
     file_content = await file.read()
+    print(f"[DEBUG] File size: {len(file_content)} bytes")
     if len(file_content) > max_size:
+        print(f"[DEBUG] File too large")
         raise HTTPException(status_code=413, detail="File too large. Maximum size: 50MB")
     
     # Save uploaded file temporarily

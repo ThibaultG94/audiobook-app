@@ -181,30 +181,8 @@ if uploaded_file is not None:
     st.write(f"📄 Fichier sélectionné : **{uploaded_file.name}**")
     st.write(f"📏 Taille : **{len(uploaded_file.getvalue()) / 1024:.1f} KB**")
 
-    # Chapter splitting option (only if chapters detected)
-    chapters_detected = False
-    if st.session_state.voices:  # Only check if API is working
-        try:
-            # Quick text extraction to check for chapters
-            from app.text_extraction import extract_text_with_metadata
-            import tempfile
-            import os
-
-            with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-                temp_file.write(uploaded_file.getvalue())
-                temp_path = temp_file.name
-
-            try:
-                _, metadata = extract_text_with_metadata(temp_path)
-                chapters_detected = metadata.get('chapter_count', 0) > 0
-            finally:
-                os.unlink(temp_path)
-        except:
-            chapters_detected = False
-
-    split_chapters = False
-    if chapters_detected:
-        split_chapters = st.checkbox("📚 Générer un fichier audio par chapitre (ZIP)", help="Crée un fichier ZIP avec un MP3 par chapitre")
+    # Chapter splitting option (available for all files)
+    split_chapters = st.checkbox("📚 Générer un fichier audio par chapitre (ZIP)", help="Si des chapitres sont détectés, crée un fichier ZIP avec un MP3 par chapitre")
 
     # Convert button
     if st.button("🚀 Convertir en audio", type="primary"):
