@@ -4,9 +4,11 @@ FastAPI application for AudioBook conversion.
 
 import os
 import shutil
+import uuid
 from pathlib import Path
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Form
 from fastapi.responses import FileResponse
+from typing import Optional
 from app.text_extraction import extract_text
 from app.tts import generate_audio, list_french_voices
 from app.database import init_db, save_conversion, update_conversion_status
@@ -128,14 +130,54 @@ async def _convert_file(file: UploadFile, background_tasks: BackgroundTasks, voi
             background_tasks.add_task(os.unlink, temp_path)
         raise HTTPException(status_code=500, detail=f"Conversion failed: {str(e)}")
 
+@app.post("/test-voice")
+async def test_voice(
+    background_tasks: BackgroundTasks,
+    text: str = Form(..., description="Texte à synthétiser (max 500 caractères)"),
+    voice: Optional[str] = Form(None, description="Nom de la voix (optionnel)")
+):
+    """Test a voice by generating a short audio sample."""
+    # Validation
+    if not text or not text.strip():
+        raise HTTPException(status_code=400, detail="Le texte ne peut pas être vide")
+
+    if len(text) > 500:
+        raise HTTPException(status_code=400, detail="Le texte ne peut pas dépasser 500 caractères")
+
+    # Generate unique filename
+    unique_id = uuid.uuid4().hex
+    base_filename = f"test_voice_{unique_id}"
+
+    try:
+        # Generate audio (no DB saving for tests)
+        audio_path = await generate_audio(text, base_filename, voice)
+
+        if not audio_path or not os.path.exists(audio_path):
+            raise HTTPException(status_code=500, detail="Échec de la génération audio")
+
+        # Schedule cleanup after response
+        background_tasks.add_task(os.unlink, audio_path)
+
+        # Return audio file directly
+        return FileResponse(
+            path=audio_path,
+            media_type='audio/mpeg',
+            filename=f"test_voice_{unique_id}.mp3"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur lors du test de voix: {str(e)}")
+
 @app.get("/download/{filename}")
 async def download_file(filename: str):
     """Download generated audio file."""
     file_path = Path("outputs") / filename
-    
+
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
-    
+
     return FileResponse(
         path=file_path,
         media_type='application/octet-stream',

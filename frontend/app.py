@@ -18,6 +18,39 @@ if 'conversion_result' not in st.session_state:
     st.session_state.conversion_result = None
 if 'voices' not in st.session_state:
     st.session_state.voices = []
+if 'test_audio' not in st.session_state:
+    st.session_state.test_audio = None
+
+# Country mapping for French locales
+COUNTRY_NAMES = {
+    'fr-FR': 'France',
+    'fr-BE': 'Belgique',
+    'fr-CA': 'Canada',
+    'fr-CH': 'Suisse',
+    'fr-LU': 'Luxembourg'
+}
+
+GENDER_NAMES = {
+    'male': 'Homme',
+    'female': 'Femme',
+    'Male': 'Homme',
+    'Female': 'Femme'
+}
+
+def format_voice_option(voice):
+    """Format voice for display in selectbox."""
+    name = voice.get('name', 'Unknown')
+    locale = voice.get('locale', 'fr')
+    gender = GENDER_NAMES.get(voice.get('gender', 'Unknown'), 'Unknown')
+    service = voice.get('service', 'unknown').title()
+    country = COUNTRY_NAMES.get(locale, locale.split('-')[1] if '-' in locale else 'France')
+
+    return f"{name} ({gender}, {country}) - {service}"
+
+def get_country_order(country):
+    """Get sort order for countries."""
+    order = {'France': 0, 'Belgique': 1, 'Canada': 2, 'Suisse': 3, 'Luxembourg': 4}
+    return order.get(country, 99)
 
 # Load voices on app start
 @st.cache_data
@@ -26,7 +59,15 @@ def load_voices():
         response = requests.get(f"{API_BASE}/voices", timeout=10)
         if response.status_code == 200:
             data = response.json()
-            return data.get('voices', [])
+            voices = data.get('voices', [])
+
+            # Sort by country, then by name
+            voices.sort(key=lambda v: (
+                get_country_order(COUNTRY_NAMES.get(v.get('locale', 'fr-FR'), 'France')),
+                v.get('name', '')
+            ))
+
+            return voices
         else:
             st.warning("Impossible de charger les voix. L'API est-elle démarrée ?")
             return []
@@ -37,14 +78,86 @@ def load_voices():
 # Load voices
 st.session_state.voices = load_voices()
 
-# Voice selector
+# Voice testing section
+st.header("🎤 Tester les voix")
+
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    test_text = st.text_input(
+        "Texte de test :",
+        value="Bonjour, ceci est un test de voix française.",
+        help="Texte court pour tester la qualité de la voix"
+    )
+
+with col2:
+    test_voice_options = ["Voix par défaut (fr-FR-DeniseNeural)"] + [
+        format_voice_option(voice) for voice in st.session_state.voices
+    ]
+
+    selected_test_voice_display = st.selectbox(
+        "Voix à tester :",
+        options=test_voice_options,
+        key="test_voice_selector"
+    )
+
+# Extract test voice name
+test_selected_voice = None
+if selected_test_voice_display != "Voix par défaut (fr-FR-DeniseNeural)":
+    for voice in st.session_state.voices:
+        if format_voice_option(voice) == selected_test_voice_display:
+            test_selected_voice = voice.get('name')
+            break
+
+# Test voice button
+if st.button("🔊 Écouter la voix", type="secondary"):
+    if not test_text.strip():
+        st.error("Veuillez entrer un texte de test.")
+    else:
+        with st.spinner("Génération de l'audio de test..."):
+            try:
+                # Use new /test-voice endpoint
+                response = requests.post(
+                    f"{API_BASE}/test-voice",
+                    data={
+                        'text': test_text,
+                        'voice': test_selected_voice
+                    },
+                    timeout=60
+                )
+
+                if response.status_code == 200:
+                    # Response is audio file directly
+                    st.session_state.test_audio = response.content
+                    st.success("✅ Audio de test généré !")
+
+                    # Display audio player
+                    st.audio(st.session_state.test_audio, format='audio/mpeg')
+                else:
+                    try:
+                        error_detail = response.json().get('detail', 'Erreur inconnue')
+                    except:
+                        error_detail = f"Erreur HTTP {response.status_code}"
+                    st.error(f"❌ Erreur de génération : {error_detail}")
+
+            except requests.exceptions.Timeout:
+                st.error("⏱️ Timeout : La génération prend trop de temps.")
+            except Exception as e:
+                st.error(f"❌ Erreur : {str(e)}")
+
+# Separator
+st.markdown("---")
+
+# Main conversion section
+st.header("📄 Convertir un document")
+
+# Voice selector for conversion (same formatting)
 voice_options = ["Voix par défaut (fr-FR-DeniseNeural)"] + [
-    f"{voice.get('name', 'Unknown')} ({voice.get('service', 'unknown')})"
-    for voice in st.session_state.voices
+    format_voice_option(voice) for voice in st.session_state.voices
 ]
 
 selected_voice_display = st.selectbox(
-    "Choisissez une voix :",
+    "Choisissez une voix pour la conversion :",
     options=voice_options,
     index=0
 )
@@ -52,9 +165,8 @@ selected_voice_display = st.selectbox(
 # Extract voice name for API call
 selected_voice = None
 if selected_voice_display != "Voix par défaut (fr-FR-DeniseNeural)":
-    # Find the corresponding voice object
     for voice in st.session_state.voices:
-        if f"{voice.get('name', 'Unknown')} ({voice.get('service', 'unknown')})" == selected_voice_display:
+        if format_voice_option(voice) == selected_voice_display:
             selected_voice = voice.get('name')
             break
 
