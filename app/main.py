@@ -9,7 +9,7 @@ from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Form
 from fastapi.responses import FileResponse
 from typing import Optional
-from app.text_extraction import extract_text
+from app.text_extraction import extract_text_with_metadata
 from app.tts import generate_audio, list_french_voices
 from app.database import init_db, save_conversion, update_conversion_status
 
@@ -81,9 +81,9 @@ async def _convert_file(file: UploadFile, background_tasks: BackgroundTasks, voi
         with open(temp_path, "wb") as buffer:
             buffer.write(file_content)
         
-        # Extract text
+        # Extract text and metadata
         try:
-            text = extract_text(str(temp_path))
+            text, metadata = extract_text_with_metadata(str(temp_path))
             if not text or not text.strip():
                 raise HTTPException(status_code=422, detail="No text could be extracted from the file")
         except Exception as e:
@@ -112,7 +112,9 @@ async def _convert_file(file: UploadFile, background_tasks: BackgroundTasks, voi
                 "download_url": f"/download/{Path(audio_path).name}",
                 "voice_used": voice or "default (fr-FR-DeniseNeural)",
                 "text_length": len(text),
-                "conversion_id": conversion_id
+                "chapters_detected": metadata['chapter_count'],
+                "conversion_id": conversion_id,
+                "metadata": metadata  # Include full metadata for future use
             }
             
         except HTTPException:

@@ -221,7 +221,7 @@ if uploaded_file is not None:
                     st.success("🎉 Conversion réussie !")
 
                     # Display results
-                    col1, col2 = st.columns(2)
+                    col1, col2, col3 = st.columns(3)
 
                     with col1:
                         st.metric("Longueur du texte", f"{result['text_length']} caractères")
@@ -231,6 +231,12 @@ if uploaded_file is not None:
                         st.metric("ID de conversion", str(result['conversion_id']))
                         audio_filename = Path(result['audio_file']).name
                         st.metric("Fichier audio", audio_filename)
+
+                    with col3:
+                        chapters = result.get('chapters_detected', 0)
+                        st.metric("Chapitres détectés", chapters)
+                        if chapters > 0:
+                            st.info(f"📖 {chapters} chapitre{'s' if chapters > 1 else ''} trouvé{'s' if chapters > 1 else ''}")
 
                     # Download section
                     try:
