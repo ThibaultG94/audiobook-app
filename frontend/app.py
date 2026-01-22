@@ -219,35 +219,34 @@ if uploaded_file is not None:
                     status_text.text("✅ Conversion terminée !")
                     
                     st.success("🎉 Conversion réussie !")
-                    
+
                     # Display results
                     col1, col2 = st.columns(2)
-                    
+
                     with col1:
                         st.metric("Longueur du texte", f"{result['text_length']} caractères")
                         st.metric("Voix utilisée", result['voice_used'])
-                    
+
                     with col2:
                         st.metric("ID de conversion", str(result['conversion_id']))
                         audio_filename = Path(result['audio_file']).name
                         st.metric("Fichier audio", audio_filename)
-                    
-                    # Download button
-                    download_url = result['download_url']
-                    if st.button("📥 Télécharger l'audio", type="primary"):
-                        try:
-                            download_response = requests.get(f"{API_BASE}{download_url}")
-                            if download_response.status_code == 200:
-                                st.download_button(
-                                    label="📥 Télécharger maintenant",
-                                    data=download_response.content,
-                                    file_name=audio_filename,
-                                    mime="audio/mpeg"
-                                )
-                            else:
-                                st.error("Erreur lors du téléchargement.")
-                        except Exception as e:
-                            st.error(f"Erreur de téléchargement: {str(e)}")
+
+                    # Download section
+                    try:
+                        download_response = requests.get(f"{API_BASE}{result['download_url']}")
+                        if download_response.status_code == 200:
+                            st.download_button(
+                                label="📥 Télécharger l'audio MP3",
+                                data=download_response.content,
+                                file_name=audio_filename,
+                                mime="audio/mpeg",
+                                type="primary"
+                            )
+                        else:
+                            st.error("Erreur lors de la récupération du fichier audio.")
+                    except Exception as e:
+                        st.error(f"Erreur de téléchargement: {str(e)}")
                 
                 else:
                     error_detail = response.json().get('detail', 'Erreur inconnue')
