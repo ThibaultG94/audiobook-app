@@ -86,34 +86,105 @@ def generate_audio_pyttsx3(text: str, output_path: str, voice_index: int = 0) ->
 
 async def generate_audio(text: str, filename: str, voice: Optional[str] = None) -> Optional[str]:
     """Generate audio from text, trying Edge-TTS first, then pyttsx3.
-    
+
     Args:
         text: Text to convert to speech
         filename: Base filename for output (without extension)
         voice: Voice name to use (optional, will use default if not specified)
-    
+
     Returns:
         Path to generated audio file, or None if failed
     """
     if not text or not text.strip():
         raise ValueError("Text cannot be empty")
-    
+
     if not filename or not isinstance(filename, str):
         raise ValueError("Invalid filename")
-    
+
     # Clean filename
     safe_filename = "".join(c for c in filename if c.isalnum() or c in (' ', '-', '_')).rstrip()
     output_path = OUTPUT_DIR / f"{safe_filename}.mp3"
-    
+
     # Try Edge-TTS first
     edge_voice = voice or "fr-FR-DeniseNeural"
     if await generate_audio_edge_tts(text, str(output_path), edge_voice):
         return str(output_path)
-    
+
     # Fallback to pyttsx3
     pyttsx3_output = OUTPUT_DIR / f"{safe_filename}_fallback.wav"
     if generate_audio_pyttsx3(text, str(pyttsx3_output)):
         return str(pyttsx3_output)
-    
+
     # Both failed
     return None
+
+async def generate_audio_chapters(text: str, chapters: List[Dict], base_filename: str, voice: Optional[str] = None) -> Optional[str]:
+    """Generate separate audio files for each chapter and create a ZIP.
+
+    Args:
+        text: Full text
+        chapters: List of chapter metadata
+        base_filename: Base filename for output
+        voice: Voice name to use
+
+    Returns:
+        Path to ZIP file containing all chapter audio files
+    """
+    import zipfile
+    import os
+
+    if not chapters:
+        return await generate_audio(text, base_filename, voice)
+
+    audio_files = []
+    chapter_texts = []
+
+    # Split text by chapters
+    sorted_chapters = sorted(chapters, key=lambda x: x['position'])
+
+    # Add text before first chapter
+    if sorted_chapters[0]['position'] > 0:
+        chapter_texts.append(('Introduction', text[:sorted_chapters[0]['position']].strip()))
+
+    # Add chapter texts
+    for i, chapter in enumerate(sorted_chapters):
+        start_pos = chapter['position']
+        end_pos = sorted_chapters[i + 1]['position'] if i + 1 < len(sorted_chapters) else len(text)
+
+        chapter_title = chapter.get('title', f"Chapitre {chapter['number']}")
+        chapter_content = text[start_pos:end_pos].strip()
+
+        # Clean up chapter content (remove chapter header if present)
+        lines = chapter_content.split('\n', 1)
+        if len(lines) > 1 and any(keyword in lines[0].lower() for keyword in ['chapitre', 'chapter', 'partie', 'part']):
+            chapter_content = lines[1].strip()
+
+        if chapter_content:
+            chapter_texts.append((chapter_title, chapter_content))
+
+    # Generate audio for each chapter
+    safe_base = "".join(c for c in base_filename if c.isalnum() or c in (' ', '-', '_')).rstrip()
+
+    for i, (title, chapter_text) in enumerate(chapter_texts):
+        if len(chapter_text.strip()) < 10:  # Skip very short chapters
+            continue
+
+        chapter_filename = f"{safe_base}_chapitre_{i+1:02d}_{title[:20].replace(' ', '_')}"
+        audio_path = await generate_audio(chapter_text, chapter_filename, voice)
+
+        if audio_path:
+            audio_files.append((f"Chapitre_{i+1:02d}_{title[:20]}.mp3", audio_path))
+
+    if not audio_files:
+        return None
+
+    # Create ZIP file
+    zip_path = OUTPUT_DIR / f"{safe_base}_chapitres.zip"
+
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for display_name, file_path in audio_files:
+            zipf.write(file_path, display_name)
+            # Clean up individual audio files after adding to ZIP
+            os.unlink(file_path)
+
+    return str(zip_path)

@@ -180,7 +180,32 @@ uploaded_file = st.file_uploader(
 if uploaded_file is not None:
     st.write(f"📄 Fichier sélectionné : **{uploaded_file.name}**")
     st.write(f"📏 Taille : **{len(uploaded_file.getvalue()) / 1024:.1f} KB**")
-    
+
+    # Chapter splitting option (only if chapters detected)
+    chapters_detected = False
+    if st.session_state.voices:  # Only check if API is working
+        try:
+            # Quick text extraction to check for chapters
+            from app.text_extraction import extract_text_with_metadata
+            import tempfile
+            import os
+
+            with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+                temp_file.write(uploaded_file.getvalue())
+                temp_path = temp_file.name
+
+            try:
+                _, metadata = extract_text_with_metadata(temp_path)
+                chapters_detected = metadata.get('chapter_count', 0) > 0
+            finally:
+                os.unlink(temp_path)
+        except:
+            chapters_detected = False
+
+    split_chapters = False
+    if chapters_detected:
+        split_chapters = st.checkbox("📚 Générer un fichier audio par chapitre (ZIP)", help="Crée un fichier ZIP avec un MP3 par chapitre")
+
     # Convert button
     if st.button("🚀 Convertir en audio", type="primary"):
         if not uploaded_file:
@@ -200,7 +225,12 @@ if uploaded_file is not None:
                 progress_bar.progress(25)
                 
                 # Call API
-                endpoint = "/convert-with-voice" if selected_voice else "/convert"
+                if split_chapters:
+                    data['split_chapters'] = 'true'
+                    endpoint = "/convert-with-chapters"
+                else:
+                    endpoint = "/convert-with-voice" if selected_voice else "/convert"
+
                 response = requests.post(
                     f"{API_BASE}{endpoint}",
                     files=files,
@@ -242,15 +272,23 @@ if uploaded_file is not None:
                     try:
                         download_response = requests.get(f"{API_BASE}{result['download_url']}")
                         if download_response.status_code == 200:
+                            file_type = result.get('file_type', 'audio')
+                            if file_type == 'zip':
+                                label = "📥 Télécharger le ZIP (chapitres)"
+                                mime = "application/zip"
+                            else:
+                                label = "📥 Télécharger l'audio MP3"
+                                mime = "audio/mpeg"
+
                             st.download_button(
-                                label="📥 Télécharger l'audio MP3",
+                                label=label,
                                 data=download_response.content,
                                 file_name=audio_filename,
-                                mime="audio/mpeg",
+                                mime=mime,
                                 type="primary"
                             )
                         else:
-                            st.error("Erreur lors de la récupération du fichier audio.")
+                            st.error("Erreur lors de la récupération du fichier.")
                     except Exception as e:
                         st.error(f"Erreur de téléchargement: {str(e)}")
                 
