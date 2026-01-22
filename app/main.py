@@ -9,7 +9,7 @@ from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Form
 from fastapi.responses import FileResponse
 from typing import Optional
-from app.text_extraction import extract_text_with_metadata
+from app.text_extraction import extract_text
 from app.tts import generate_audio, generate_audio_chapters, list_french_voices
 from app.database import init_db, save_conversion, update_conversion_status
 
@@ -54,21 +54,12 @@ async def convert_file_with_voice(
     """Convert uploaded file to audio with specified voice."""
     return await _convert_file(file, background_tasks, voice=voice)
 
-@app.post("/convert-with-chapters")
-async def convert_file_with_chapters(
-    background_tasks: BackgroundTasks,
-    split_chapters: bool = Form(False, description="Générer un fichier par chapitre"),
-    voice: str = Form(None, description="Nom de la voix"),
-    file: UploadFile = File(...)
-):
-    """Convert uploaded file to audio with optional chapter splitting."""
-    return await _convert_file(file, background_tasks, voice=voice, split_chapters=split_chapters)
 
-async def _convert_file(file: UploadFile, background_tasks: BackgroundTasks, voice: str = None, split_chapters: bool = False):
+async def _convert_file(file: UploadFile, background_tasks: BackgroundTasks, voice: str = None):
     """Internal conversion function."""
     print(f"[DEBUG] Converting file: {file.filename}")
     print(f"[DEBUG] Content type: {file.content_type}")
-    print(f"[DEBUG] Voice: {voice}, split_chapters: {split_chapters}")
+    print(f"[DEBUG] Voice: {voice}")
 
     # Validate file type
     allowed_extensions = ['.pdf', '.epub', '.txt']
@@ -89,43 +80,40 @@ async def _convert_file(file: UploadFile, background_tasks: BackgroundTasks, voi
     if len(file_content) > max_size:
         print(f"[DEBUG] File too large")
         raise HTTPException(status_code=413, detail="File too large. Maximum size: 50MB")
-    
+
     # Save uploaded file temporarily
     uploads_dir = Path("uploads")
     uploads_dir.mkdir(exist_ok=True)
     temp_path = uploads_dir / f"temp_{file.filename}"
-    
+
     try:
         with open(temp_path, "wb") as buffer:
             buffer.write(file_content)
-        
-        # Extract text and metadata
+
+        # Extract text
         try:
-            text, metadata = extract_text_with_metadata(str(temp_path))
+            print(f"[DEBUG] Extracting text from {temp_path}")
+            text = extract_text(str(temp_path))
+            print(f"[DEBUG] Extracted {len(text)} characters")
             if not text or not text.strip():
                 raise HTTPException(status_code=422, detail="No text could be extracted from the file")
         except Exception as e:
+            print(f"[DEBUG] Text extraction failed: {str(e)}")
             raise HTTPException(status_code=422, detail=f"Text extraction failed: {str(e)}")
-        
+
         # Save conversion record
         conversion_id = await save_conversion(file.filename)
-        
+
         # Generate audio
         base_filename = Path(file.filename).stem
         try:
-            # Check if we should split by chapters
-            chapters = metadata.get('chapters', [])
-            if split_chapters and chapters:
-                audio_path = await generate_audio_chapters(text, chapters, base_filename, voice)
-                file_type = "zip"
-            else:
-                audio_path = await generate_audio(text, base_filename, voice)
-                file_type = "audio"
-
+            print(f"[DEBUG] Generating audio for {base_filename}")
+            audio_path = await generate_audio(text, base_filename, voice)
             if not audio_path:
                 await update_conversion_status(conversion_id, "failed")
                 raise HTTPException(status_code=500, detail="Audio generation failed. Try again later.")
 
+            print(f"[DEBUG] Audio generated at {audio_path}")
             await update_conversion_status(conversion_id, "completed")
 
             # Schedule cleanup of temp file
@@ -138,19 +126,16 @@ async def _convert_file(file: UploadFile, background_tasks: BackgroundTasks, voi
                 "download_url": f"/download/{Path(audio_path).name}",
                 "voice_used": voice or "default (fr-FR-DeniseNeural)",
                 "text_length": len(text),
-                "chapters_detected": metadata['chapter_count'],
-                "chapters_split": split_chapters and bool(chapters),
-                "file_type": file_type,
-                "conversion_id": conversion_id,
-                "metadata": metadata  # Include full metadata for future use
+                "conversion_id": conversion_id
             }
-            
+
         except HTTPException:
             raise
         except Exception as e:
+            print(f"[DEBUG] Audio generation error: {str(e)}")
             await update_conversion_status(conversion_id, "failed")
             raise HTTPException(status_code=500, detail=f"Audio generation failed: {str(e)}")
-    
+
     except HTTPException:
         # Re-raise HTTP exceptions
         raise
@@ -158,6 +143,7 @@ async def _convert_file(file: UploadFile, background_tasks: BackgroundTasks, voi
         # Clean up temp file on any error
         if temp_path.exists():
             background_tasks.add_task(os.unlink, temp_path)
+        print(f"[DEBUG] Conversion error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Conversion failed: {str(e)}")
 
 @app.post("/test-voice")

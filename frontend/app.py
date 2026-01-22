@@ -181,55 +181,47 @@ if uploaded_file is not None:
     st.write(f"📄 Fichier sélectionné : **{uploaded_file.name}**")
     st.write(f"📏 Taille : **{len(uploaded_file.getvalue()) / 1024:.1f} KB**")
 
-    # Chapter splitting option (available for all files)
-    split_chapters = st.checkbox("📚 Générer un fichier audio par chapitre (ZIP)", help="Si des chapitres sont détectés, crée un fichier ZIP avec un MP3 par chapitre")
-
     # Convert button
     if st.button("🚀 Convertir en audio", type="primary"):
         if not uploaded_file:
             st.error("Veuillez sélectionner un fichier d'abord.")
             st.stop()
-        
+
         with st.spinner("Conversion en cours... Veuillez patienter..."):
             progress_bar = st.progress(0)
             status_text = st.empty()
-            
+
             try:
                 # Prepare file for upload
                 files = {'file': (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
                 data = {'voice': selected_voice} if selected_voice else {}
-                
+
                 status_text.text("📤 Envoi du fichier à l'API...")
                 progress_bar.progress(25)
-                
-                # Call API
-                if split_chapters:
-                    data['split_chapters'] = 'true'
-                    endpoint = "/convert-with-chapters"
-                else:
-                    endpoint = "/convert-with-voice" if selected_voice else "/convert"
 
+                # Call API
+                endpoint = "/convert-with-voice" if selected_voice else "/convert"
                 response = requests.post(
                     f"{API_BASE}{endpoint}",
                     files=files,
                     data=data,
                     timeout=300  # 5 minutes timeout
                 )
-                
+
                 progress_bar.progress(75)
                 status_text.text("🎵 Génération de l'audio...")
-                
+
                 if response.status_code == 200:
                     result = response.json()
                     st.session_state.conversion_result = result
-                    
+
                     progress_bar.progress(100)
                     status_text.text("✅ Conversion terminée !")
-                    
+
                     st.success("🎉 Conversion réussie !")
 
                     # Display results
-                    col1, col2, col3 = st.columns(3)
+                    col1, col2 = st.columns(2)
 
                     with col1:
                         st.metric("Longueur du texte", f"{result['text_length']} caractères")
@@ -240,40 +232,26 @@ if uploaded_file is not None:
                         audio_filename = Path(result['audio_file']).name
                         st.metric("Fichier audio", audio_filename)
 
-                    with col3:
-                        chapters = result.get('chapters_detected', 0)
-                        st.metric("Chapitres détectés", chapters)
-                        if chapters > 0:
-                            st.info(f"📖 {chapters} chapitre{'s' if chapters > 1 else ''} trouvé{'s' if chapters > 1 else ''}")
-
                     # Download section
                     try:
-                        download_response = requests.get(f"{API_BASE}{result['download_url']}")
+                        download_response = requests.get(f"{API_BASE}{result['download_url']}", timeout=30)
                         if download_response.status_code == 200:
-                            file_type = result.get('file_type', 'audio')
-                            if file_type == 'zip':
-                                label = "📥 Télécharger le ZIP (chapitres)"
-                                mime = "application/zip"
-                            else:
-                                label = "📥 Télécharger l'audio MP3"
-                                mime = "audio/mpeg"
-
                             st.download_button(
-                                label=label,
+                                label="📥 Télécharger l'audio",
                                 data=download_response.content,
                                 file_name=audio_filename,
-                                mime=mime,
+                                mime="audio/mpeg",
                                 type="primary"
                             )
                         else:
-                            st.error("Erreur lors de la récupération du fichier.")
+                            st.error("❌ Erreur lors de la récupération du fichier")
                     except Exception as e:
-                        st.error(f"Erreur de téléchargement: {str(e)}")
-                
+                        st.error(f"❌ Erreur de téléchargement: {str(e)}")
+
                 else:
                     error_detail = response.json().get('detail', 'Erreur inconnue')
                     st.error(f"❌ Erreur de conversion : {error_detail}")
-                    
+
             except requests.exceptions.Timeout:
                 st.error("⏱️ Timeout : La conversion prend trop de temps. Réessayez avec un fichier plus petit.")
             except requests.exceptions.ConnectionError:
